@@ -45,11 +45,72 @@ extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Query(const SKSE::QueryInterface* a
 	return true;
 }
 
+class AnimEventHandler
+{
+public:
+	static void InstallHook()
+	{
+		//REL::Relocation<uintptr_t> AnimEventVtbl_NPC{ RE::VTABLE_Character[2] };
+		REL::Relocation<uintptr_t> AnimEventVtbl_PC{ RE::VTABLE_PlayerCharacter[2] };
+
+		//_ProcessEvent_NPC = AnimEventVtbl_NPC.write_vfunc(0x1, ProcessEvent_NPC);
+		_ProcessEvent_PC = AnimEventVtbl_PC.write_vfunc(0x1, ProcessEvent_PC);
+	}
+
+private:
+	static inline void ProcessEvent(RE::BSTEventSink<RE::BSAnimationGraphEvent>*, RE::BSAnimationGraphEvent* a_event,
+		RE::BSTEventSource<RE::BSAnimationGraphEvent>*)
+	{
+		if (!a_event->holder) {
+			return;
+		}
+		std::string_view eventTag = a_event->tag.data();
+
+		if (eventTag == "FootLeft"sv || eventTag == "FootRight"sv) {
+			//draw_point(a_event->holder->GetPosition());
+			auto ieff = RE::TESDataHandler::GetSingleton()->LookupForm<RE::BGSImpactDataSet>(0x800, "FootPrintsRE.esp"sv);
+			RE::NiPoint3 pickdir{ 0, 0, -1 };
+			RE::BGSImpactManager::GetSingleton()->PlayImpactEffect(a_event->holder, ieff, "NPC L Calf [LClf]"sv, pickdir, 128,
+				false, false);
+		}
+	}
+
+	//static RE::BSEventNotifyControl ProcessEvent_NPC(RE::BSTEventSink<RE::BSAnimationGraphEvent>* a_sink,
+	//	RE::BSAnimationGraphEvent* a_event, RE::BSTEventSource<RE::BSAnimationGraphEvent>* a_eventSource);
+	
+	static RE::BSEventNotifyControl ProcessEvent_PC(RE::BSTEventSink<RE::BSAnimationGraphEvent>* a_sink,
+		RE::BSAnimationGraphEvent* a_event, RE::BSTEventSource<RE::BSAnimationGraphEvent>* a_eventSource)
+	{
+		ProcessEvent(a_sink, a_event, a_eventSource);
+		return _ProcessEvent_PC(a_sink, a_event, a_eventSource);
+	}
+
+	//static inline REL::Relocation<decltype(ProcessEvent_NPC)> _ProcessEvent_NPC;
+	static inline REL::Relocation<decltype(ProcessEvent_PC)> _ProcessEvent_PC;
+};
+
+class DebugAPIHook
+{
+public:
+	static void Hook() { _Update = REL::Relocation<uintptr_t>(REL::ID(RE::VTABLE_PlayerCharacter[0])).write_vfunc(0xad, Update); }
+
+private:
+	static void Update(RE::PlayerCharacter* a, float delta)
+	{
+		_Update(a, delta);
+
+		SKSE::GetTaskInterface()->AddUITask([]() { DebugAPI_IMPL::DebugAPI::Update(); });
+	}
+
+	static inline REL::Relocation<decltype(Update)> _Update;
+};
+
 static void SKSEMessageHandler(SKSE::MessagingInterface::Message* message)
 {
 	switch (message->type) {
 	case SKSE::MessagingInterface::kDataLoaded:
-		//
+		AnimEventHandler::InstallHook();
+		DebugAPIHook::Hook();
 
 		break;
 	}
